@@ -1,0 +1,50 @@
+import pandas as pd
+from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
+
+def get_stats(df):
+    expected_label_column = list(df["Expected_label"])
+    given_label_column = list(df["Given_label"])
+
+    confusion_matrix = confusion_matrix(expected_label_column, given_label_column, labels=["no", "yes"])
+    tn, fp, fn, tp = confusion_matrix.ravel()
+    total = tn + fp + fn + tp
+
+    accuracy = (tn + tp) / total
+    # print ('Accuracy : ', accuracy)
+
+    sensitivity = tp / (fn + tp)
+    # print('Sensitivity : ', sensitivity )
+
+    specificity = tn / (tn + fp)
+    # print('Specificity : ', specificity)
+
+    # print((tn, fp, fn, tp))
+
+
+# method for plotting a learning curve = training data size vs. error (error is 1-accuracy)
+# also plot validation vs. error (on the same plot)
+def create_data_point(accuracy, training_size):
+    training_data_size = training_size
+    error_training = 1 - accuracy
+    error_validation = 1 - accuracy
+    plt.plot(training_data_size, error_training)
+    plt.plot(training_data_size, error_validation)
+
+df = pd.read_csv("100.csv")
+get_stats(df)
+create_data_point(accuracy, 1)
+
+df = pd.read_csv("90.csv")
+get_stats(df)
+create_data_point(accuracy, .9)
+
+df = pd.read_csv("90.csv")
+get_stats(df)
+create_data_point(accuracy, .8)
+
+df = pd.read_csv("90.csv")
+get_stats(df)
+create_data_point(accuracy, .7)
+
+plt.show()
