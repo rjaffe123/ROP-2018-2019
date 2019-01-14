@@ -1,0 +1,321 @@
+from __future__ import print_function, division
+from sklearn.metrics import confusion_matrix
+from torch.utils.data.sampler import SubsetRandomSampler
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.optim import lr_scheduler
+# from ResNetUSM import *
+import numpy as np
+import torchvision
+from torchvision import datasets, models, transforms
+import matplotlib.pyplot as plt
+import time
+import os
+import copy
+import csv
+
+plt.ion()
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")  # cuda is a system for the GPU
+use_cuda = torch.cuda.is_available()
+
+
+def imshow(inp, title=None):
+    """Imshow for Tensor."""
+    inp = inp.numpy().transpose((1, 2, 0))
+    mean = np.array([0.485, 0.456, 0.406])
+    std = np.array([0.229, 0.224, 0.225])
+    inp = std * inp + mean
+    inp = np.clip(inp, 0, 1)
+    plt.imshow(inp)
+    if title is not None:
+        plt.title(title)
+    plt.pause(0.001)  # pause a bit so that plots are updated
+
+    print("en teoria done")
+    model = model_generation()
+    csv_val_model(model, name_pth)
+
+
+def eval_model(dataloaders, dataset_sizes, model, criterion, optimizer, scheduler):
+    phase = 'val'
+    since = time.time()
+    best_model_wts = copy.deepcopy(model.state_dict())
+    best_acc = 0.0
+    model.eval()  # Set model to evaluate mode
+    running_loss = 0.0
+    running_corrects = 0
+
+    # Iterate over data.
+    for inputs, labels in dataloaders['val']:
+        inputs = inputs.to(device)
+        labels = labels.to(device)
+
+        # zero the parameter gradients
+        optimizer.zero_grad()
+
+        # forward
+        # track history if only in train
+        with torch.set_grad_enabled(phase == 'train'):
+            outputs = model(inputs)
+            _, preds = torch.max(outputs, 1)
+            loss = criterion(outputs, labels)
+        # statistics
+        running_loss += loss.item() * inputs.size(0)
+        running_corrects += torch.sum(preds == labels.data)
+
+    epoch_loss = running_loss / dataset_sizes[phase]
+    epoch_acc = running_corrects.double() / dataset_sizes[phase]
+
+    print('{} Loss: {:.4f} Acc: {:.4f}'.format(
+        phase, epoch_loss, epoch_acc))
+
+    if phase == 'val' and epoch_acc > best_acc:
+        best_acc = epoch_acc
+
+    time_elapsed = time.time() - since
+    print('Evaluation complete in {:.0f}m {:.0f}s'.format(
+        time_elapsed // 60, time_elapsed % 60))
+    print('Best val Acc: {:4f}'.format(best_acc))
+    return best_acc
+
+
+def train_model(dataloaders, dataset_sizes, name_pth, model, criterion, optimizer, scheduler, num_epochs=25):
+    since = time.time()  # how long it takes the run this
+
+    best_model_wts = copy.deepcopy(model.state_dict())  # copy of the model from the first run
+    best_acc = 0.0
+
+    for epoch in range(num_epochs):
+        print('Epoch {}/{}'.format(epoch, num_epochs - 1))
+        print('-' * 10)
+
+        # Each epoch has a training and validation phase
+        for phase in ['train', 'val']:
+            # print("phase that is: " + phase)
+            if phase == 'train':
+                scheduler.step()
+                model.train()  # Set model to training mode**
+            else:
+                model.eval()  # Set model to evaluate mode
+            running_loss = 0.0
+            running_corrects = 0
+
+            # Iterate over data.
+            for inputs, labels in dataloaders[phase]:  # inputs as images as Tensors
+                inputs = inputs.to(device)
+                labels = labels.to(device)
+
+                # zero the parameter gradients
+                optimizer.zero_grad()
+
+                # forward
+                # track history if only in train
+                with torch.set_grad_enabled(phase == 'train'):
+                    outputs = model(inputs)
+                    _, preds = torch.max(outputs, 1)
+                    loss = criterion(outputs, labels)
+
+                    # backward + optimize only if in training phase
+                    if phase == 'train':
+                        loss.backward()
+                        optimizer.step()
+
+                # statistics
+                running_loss += loss.item() * inputs.size(0)
+                running_corrects += torch.sum(preds == labels.data)
+            # print("4phase that is (EPOCH LOSS AND ACC): " + phase)
+            epoch_loss = running_loss / dataset_sizes[phase]
+            epoch_acc = running_corrects.double() / dataset_sizes[phase]
+
+            print('{} Loss: {:.4f} Acc: {:.4f}'.format(
+                phase, epoch_loss, epoch_acc))
+
+            # deep copy the model
+            if phase == 'val' and epoch_acc > best_acc:
+                best_acc = epoch_acc
+                best_model_wts = copy.deepcopy(model.state_dict())
+
+    time_elapsed = time.time() - since
+    print('Training complete in {:.0f}m {:.0f}s'.format(
+        time_elapsed // 60, time_elapsed % 60))
+    print('Best val Acc: {:4f}'.format(best_acc))
+
+    # load best model weights
+    model.load_state_dict(best_model_wts)
+    if not os.path.exists("./models/"):
+        os.makedirs("./models/")
+    torch.save(model.state_dict(), "./models/" + name_pth + ".pth")
+    return model, best_acc
+
+
+def visualize_model(model, num_images=6):
+    was_training = model.training
+    model.eval()
+    images_so_far = 0
+    fig = plt.figure()
+
+    with torch.no_grad():
+        for i, (inputs, labels) in enumerate(dataloaders['val']):
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+
+            outputs = model(inputs)
+            _, preds = torch.max(outputs, 1)
+
+            for j in range(inputs.size()[0]):
+                images_so_far += 1
+                ax = plt.subplot(num_images // 2, 2, images_so_far)
+                ax.axis('off')
+                ax.set_title('predicted: {}'.format(class_names[preds[j]]))
+                imshow(inputs.cpu().data[j])
+
+                if images_so_far == num_images:
+                    model.train(mode=was_training)
+                    return
+        model.train(mode=was_training)
+
+
+# Save the results in a CSV
+def csv_val_model(class_names, dataloaders, model, csv_name="results"):
+    was_training = model.training
+    print("was training: " + str(was_training))
+
+    model.eval()
+    with open(csv_name + '.csv', 'w', newline='') as csvfile:
+        fieldnames = ["Expected_label", "Given_label"]
+        csvwriter = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        csvwriter.writeheader()
+    with torch.no_grad():
+        for i, (inputs, labels) in enumerate(dataloaders['val']):
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+
+            outputs = model(inputs)
+            probs, preds = torch.max(outputs, 1)
+            label = ""
+            # segun lo que entiendo aqui hace todos y solo toma 6
+            for j in range(inputs.size()[0]):
+                with open(csv_name + '.csv', 'a', newline='') as csvfile:
+                    csvwriter = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    if (labels.cpu().data[j].item() == 1):
+                        label = "yes"
+                    else:
+                        label = "no"
+                    csvwriter.writerow({'Expected_label': label, 'Given_label': class_names[preds[j]]})
+        model.train(mode=was_training)
+    #print("ok?")
+
+
+def load_model(dataloaders, dataset_sizes, name_pth, model, path, criterion, optimizer, scheduler, num_epochs=25):
+    # Checks if a model pre-exists in the giving path, .pth file if not call the training
+    if (os.path.exists(path)):
+        for fname in os.listdir(path):
+            if fname.endswith('.pth'):
+                # do stuff on the file
+                src_file = os.path.join(path, fname)
+                print(src_file)
+                model.load_state_dict(torch.load(src_file))
+                best_acc = eval_model(dataloaders, dataset_sizes, model, criterion, optimizer, scheduler)
+                return model, best_acc
+    model, best_acc = train_model(dataloaders, dataset_sizes, name_pth, model, criterion, optimizer, scheduler,
+                                  num_epochs=25)
+    return model, best_acc
+
+
+def model_generation(dataloaders, dataset_sizes, name_pth):
+    # model_ft = resnet18_usm(pretrained=True, cuda=use_cuda)
+    model_ft = models.resnet18(pretrained=True)
+
+    model_ft.avgpool = nn.AdaptiveAvgPool2d(1)  # changes it to allow 512x512
+    num_ftrs = model_ft.fc.in_features
+    model_ft.fc = nn.Linear(num_ftrs, 2)  # change the output from 1000 to 2 --> trained from ImageNet
+
+    model_ft = model_ft.to(device)
+    # the next three must be created because they are parameters requested by the model
+    criterion = nn.CrossEntropyLoss()
+
+    # Observe that all parameters are being optimized
+    optimizer_ft = optim.SGD(model_ft.parameters(), lr=0.001, momentum=0.9)
+
+    # Decay LR by a factor of 0.1 every 7 epochs
+    exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=7, gamma=0.1)
+
+    _, best_acc = load_model(dataloaders, dataset_sizes, name_pth, model_ft, "./models/", criterion, optimizer_ft, exp_lr_scheduler,
+                             num_epochs=25)
+    # do stuff if a file .true doesn't exist.
+    #
+    return model_ft, best_acc
+
+
+######################################################################
+
+def main():
+    # name_pth is the name of the file for the final model weights
+    name_pth = "name_of_file"
+
+    # Data augmentation and normalization for training
+    # Just normalization for validation
+    size = 512  # size of the transformations
+    data_transforms = transforms.Compose([
+        transforms.Resize(size),
+        transforms.ToTensor(),  # tensor of pytorch
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])  # types transformations to the images in the dataset
+
+    data_dir = 'all_pictures'  # the directory where Ariana has her data set -- where THIS file is saved, in YES and NO
+    dataset = datasets.ImageFolder(data_dir, data_transforms)
+    #print(dataset)  # it should give you a list -- each element has a tensor ( a lot of numbers), the label (0 or 1)
+
+    batch_size = 4
+    num_workers = 4
+    validation_split = .3
+    shuffle_dataset = True
+    random_seed = 42
+    k_cross_validation = 3
+    total = 0
+
+    # Creating data indices for training and validation splits:
+    dataset_size = len(dataset)  # --> should be 2500
+    indices = list(range(dataset_size))
+    split = int(np.floor(validation_split * dataset_size))
+    if shuffle_dataset:
+        #print(random_seed * 5)
+        np.random.seed(random_seed * 10)
+        np.random.shuffle(indices)
+    train_indices, val_indices = indices[split:], indices[:split]
+    # now we have the train and validation set
+    valid_sampler = SubsetRandomSampler(val_indices)
+    # add another nested for loop to change the decreased sample size:
+    for n in [1, 0.9, 0.8, 0.7]:
+        for i in range(k_cross_validation):
+            # Creating Pytorch data samplers and loaders:
+            if shuffle_dataset:
+                #print(random_seed + i * 5)
+                np.random.seed(random_seed + i * 10)
+                np.random.shuffle(train_indices)
+            shrink_train_indices_length = int(n * (len(train_indices)))  # shrink here
+            shrink_train_indices = train_indices[:shrink_train_indices_length]
+            train_sampler = SubsetRandomSampler(shrink_train_indices)
+
+            # going to load the data in a way that pytorch knows how to handle it
+            train_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size,
+                                                       sampler=train_sampler, num_workers=num_workers)
+            validation_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size,
+                                                            sampler=valid_sampler, num_workers=num_workers)
+
+            # **
+            dataloaders = {'train': train_loader, "val": validation_loader}  # change to the static variable
+            dataset_sizes = {'train': len(shrink_train_indices), "val": len(val_indices)}
+            print(dataset_sizes)
+            class_names = ['no', 'yes']  # 0 is no, yes is 1
+
+            # time.sleep(60)
+            print("en teoria done")
+            model, best_acc = model_generation(dataloaders, dataset_sizes, name_pth)
+            total += best_acc
+        print("cross valid acc is: " + str(total / k_cross_validation))
+        name_path = str(n * 100)
+        csv_val_model(class_names, dataloaders, model, name_pth)
+main()
+
