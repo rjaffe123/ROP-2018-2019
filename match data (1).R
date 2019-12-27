@@ -81,18 +81,17 @@ time <- new_format$time
 difficulty <-new_format$difficulty
 ACC <- new_format$ACC
 
-
-myfit1 <- aov(ACC~time*difficulty*gender)
-myfit2 <- aov(ACC~time*difficulty)
-myfit3 <- aov(ACC~time*gender)
-myfit4 <- aov(ACC~difficulty*gender)
-summary(myfit1)
-#plot_model(myfit1, type = "pred")
-interaction.plot(time, difficulty, ACC, xlab = "time", ylab = "ACC", type="b",pch=c(21,19), las=1)
+shapiro.test(ACC) ##assume normality 
+myfit1 <- aov(ACC~time*difficulty*gender) #3 way interaction
+#myfit2 <- aov(ACC~time*difficulty) #two way
+#myfit3 <- aov(ACC~time*gender) #2-way
+#myfit4 <- aov(ACC~difficulty*gender) #2-way
+summary(myfit1) #an output of the 3 way interaction
 plot_model(myfit1, type = "int", line.size = 1, show.values = TRUE) #3-way interaction
-plot_model(myfit2, type = "int")
-plot_model(myfit3, type = "int")
-plot_model(myfit4, type="int")
+# plot_model(myfit2, type = "int")
+# plot_model(myfit3, type = "int")
+# plot_model(myfit4, type="int")
+
 #Dummy Variable Regression
 #new_format$category <- factor(new_format$category, levels = c(1,2,3,4), labels = c("postEasy", "postHard", "preEasy", "preHard"))
 levels(new_format$category)[1] <- "postEasy"
